@@ -4,7 +4,7 @@
 # up-and-running on a freshly installed Debian-based system (including Ubuntu).
 
 # Quick start:
-# wget -O - https://raw.github.com/fpco/stackage/master/debian-bootstrap.sh | bash -ex
+# wget -O - https://raw.github.com/commercialhaskell/stackage/master/debian-bootstrap.sh | bash -ex
 
 # NOTE: Requires that GHC and Cabal are installed and on your PATH. For
 # instructions, see:
@@ -25,14 +25,16 @@ add-apt-repository -y --keyserver hkp://keyserver.ubuntu.com:80 'deb http://down
 add-apt-repository -y --keyserver hkp://keyserver.ubuntu.com:80 'deb http://download.mono-project.com/repo/debian wheezy-apache24-compat main'
 add-apt-repository -y --keyserver hkp://keyserver.ubuntu.com:80 'deb http://download.mono-project.com/repo/debian wheezy-libjpeg62-compat main'
 
-GHCVER=8.2.2
+GHCVER=8.6.2
 
 apt-get update
 apt-get install -y \
+    apt-transport-https \
     build-essential \
     cmake \
     curl \
     freeglut3-dev \
+    freetds-dev \
     fsharp \
     g++ \
     gawk \
@@ -41,6 +43,7 @@ apt-get install -y \
     ghc-$GHCVER-htmldocs \
     ghc-$GHCVER-prof \
     git \
+    gnupg \
     gradle \
     hscolour \
     libadns1-dev \
@@ -96,9 +99,12 @@ apt-get install -y \
     liboath-dev \
     libnotify-dev \
     libopenal-dev \
+    libopenmpi-dev \
     libpango1.0-dev \
     libpcap0.8-dev \
     libpq-dev \
+    libre2-dev \
+    librocksdb-dev \
     libsdl1.2-dev \
     libsdl2-dev \
     libsdl2-gfx-dev \
@@ -115,6 +121,7 @@ apt-get install -y \
     libtre-dev \
     libudev-dev \
     libusb-1.0-0-dev \
+    libvte-2.91-dev \
     libwebkitgtk-3.0-dev \
     libxau-dev \
     libxml2-dev \
@@ -122,6 +129,7 @@ apt-get install -y \
     libxss-dev \
     libyaml-dev \
     libzip-dev \
+    libzstd-dev \
     libzmq3-dev \
     llvm-3.9 \
     locales \
@@ -141,11 +149,18 @@ apt-get install -y \
     r-base-dev \
     ruby-dev \
     sudo \
+    unixodbc-dev \
     wget \
     xclip \
     z3 \
     zip \
     zlib1g-dev
+
+# odbc
+curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add -
+curl https://packages.microsoft.com/config/debian/9/prod.list > /etc/apt/sources.list.d/mssql-release.list
+apt-get update
+ACCEPT_EULA=Y apt-get install msodbcsql17 -y
 
 locale-gen en_US.UTF-8
 
@@ -153,6 +168,18 @@ curl -sSL https://get.haskellstack.org/ | sh
 
 # Put documentation where we expect it
 mv /opt/ghc/$GHCVER/share/doc/ghc-$GHCVER/ /opt/ghc/$GHCVER/share/doc/ghc
+
+# llvm-5.0 for GHC (separate since it needs wget)
+wget -O - http://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
+    && add-apt-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-5.0 main" \
+    && apt-get update \
+    && apt-get install -y llvm-5.0
+
+# llvm-7.0 for llvm-hs (separate since it needs wget)
+wget -O - http://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
+    && add-apt-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-7 main" \
+    && apt-get update \
+    && apt-get install -y llvm-7
 
 # Buggy versions of ld.bfd fail to link some Haskell packages:
 # https://sourceware.org/bugzilla/show_bug.cgi?id=17689. Gold is
@@ -164,9 +191,14 @@ update-alternatives --install "/usr/bin/ld" "ld" "/usr/bin/ld.bfd" 10
 # This version is tracked here:
 # https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/Backends/LLVM/Installing
 #
-# GHC 8.2 requires LLVM 3.9 tools (specifically, llc-3.9 and opt-3.9).
-update-alternatives --install "/usr/bin/llc" "llc" "/usr/bin/llc-3.9" 50
-update-alternatives --install "/usr/bin/opt" "opt" "/usr/bin/opt-3.9" 50
+# GHC 8.4 requires LLVM 5.0 tools (specifically, llc-5.0 and opt-5.0).
+update-alternatives --install "/usr/bin/llc" "llc" "/usr/bin/llc-5.0" 50
+update-alternatives --install "/usr/bin/opt" "opt" "/usr/bin/opt-5.0" 50
+
+# Made sure a "node" binary is in the path, as well as "nodejs".
+# A historical naming collision on Debian means that the binary is called "nodejs",
+# but some tools like tsc still expect "node" to exist.
+ln -s /usr/bin/nodejs /usr/bin/node
 
 # install ocilib dependencies then build and install ocilib
 cd /tmp \
@@ -195,11 +227,14 @@ cd /tmp \
 echo "/usr/lib/jvm/java-8-openjdk-amd64/jre/lib/amd64/server/" > /etc/ld.so.conf.d/openjdk.conf \
     && ldconfig
 
-# llvm-4.0 for llvm-hs (separate since it needs wget)
-wget -O - http://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - \
-    && add-apt-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-5.0 main" \
-    && apt-get update \
-    && apt-get install -y llvm-5.0
+# Install erlang/otp platform and its dependencies
+ERLANG_VERSION="20.2.2"
+ERLANG_DEB_FILE="esl-erlang_${ERLANG_VERSION}-1~debian~jessie_amd64.deb"
+pushd /tmp \
+    && wget https://packages.erlang-solutions.com/erlang/esl-erlang/FLAVOUR_1_general/${ERLANG_DEB_FILE} \
+    && (dpkg -i ${ERLANG_DEB_FILE}; apt-get install -yf) \
+    && rm ${ERLANG_DEB_FILE} \
+    && popd
 
 # Install version 3 of the protobuf compiler.  (The `protobuf-compiler` package only
 # supports version 2.)
@@ -213,15 +248,34 @@ curl https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-l
     && rm libtensorflow.tar.gz \
     && ldconfig
 
+# Install libsodium
+curl https://download.libsodium.org/libsodium/releases/LATEST.tar.gz > libsodium.tar.gz \
+	&& sudo tar xfz libsodium.tar.gz -C /tmp \
+	&& rm libsodium.tar.gz \
+	&& cd /tmp/libsodium-stable \
+	&& ./configure \
+	&& make install
+
+# Install secp256k1
+cd /tmp \
+  && git clone https://github.com/bitcoin-core/secp256k1.git \
+  && cd secp256k1 \
+  && ./autogen.sh \
+  && ./configure --enable-module-recovery \
+  && make \
+  && make install
+
+
 # NOTE: also update Dockerfile when cuda version changes
 # Install CUDA toolkit
 # The current version can be found at: https://developer.nvidia.com/cuda-downloads
-CUDA_PKG=8.0.61-1         # update this on new version
-CUDA_VER=${CUDA_PKG:0:3}
-CUDA_APT=${CUDA_VER/./-}
+CUDA_PKG=10.0.130-1
+CUDA_VER=10.0
+CUDA_APT=10-0
 
 pushd /tmp \
     && wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1604/x86_64/cuda-repo-ubuntu1604_${CUDA_PKG}_amd64.deb \
+    && apt-key adv --fetch-keys http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1604/x86_64/7fa2af80.pub \
     && dpkg -i cuda-repo-ubuntu1604_${CUDA_PKG}_amd64.deb \
     && apt-get update -qq \
     && apt-get install -y cuda-drivers cuda-core-${CUDA_APT} cuda-cudart-dev-${CUDA_APT} cuda-cufft-dev-${CUDA_APT} cuda-cublas-dev-${CUDA_APT} cuda-cusparse-dev-${CUDA_APT} cuda-cusolver-dev-${CUDA_APT} \
@@ -236,3 +290,12 @@ pushd /tmp \
 apt-add-repository multiverse \
     && apt-get update \
     && apt-get install -y nvidia-cuda-dev
+
+# newer gcc version for yoga
+add-apt-repository ppa:ubuntu-toolchain-r/test \
+    && apt-get update \
+    && apt-get install gcc-7 \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-7 60 --slave /usr/bin/g++ g++ /usr/bin/g++-7
+
+export CLANG_PURE_LLVM_LIB_DIR=/usr/lib/llvm-3.9/lib;
+export CLANG_PURE_LLVM_INCLUDE_DIR=/usr/lib/llvm-3.9/include;
